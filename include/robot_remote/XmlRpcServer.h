@@ -1,0 +1,40 @@
+#pragma once
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "robot_remote/XmlRpcValue.h"
+
+namespace robot_remote {
+
+class XmlRpcServer {
+public:
+    /// Callback for handling XML-RPC method calls.
+    using MethodHandler = std::function<XmlRpcValue(const std::string &, const std::vector<XmlRpcValue> &)>;
+
+    /// Create a server that listens on the given port.
+    XmlRpcServer(int port, MethodHandler handler);
+    ~XmlRpcServer();
+
+    /// Start the server loop on a background thread.
+    bool start();
+    /// Stop the server and join the background thread.
+    void stop();
+    /// Query whether the server thread is active.
+    bool is_running() const;
+
+private:
+    void run();
+
+    int port_;
+    MethodHandler handler_;
+    std::atomic<bool> running_{false};
+    std::thread thread_;
+    int server_fd_{-1};
+};
+
+}  // namespace robot_remote

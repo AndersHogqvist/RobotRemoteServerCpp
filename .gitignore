@@ -1,0 +1,11 @@
+# Build output
+build/
+
+# Generated docs
+docs/
+
+# Local tooling
+.cache/
+
+# OS files
+.DS_Store
