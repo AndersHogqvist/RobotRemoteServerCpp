@@ -9,6 +9,13 @@ cmake -S . -B build
 cmake --build build
 ```
 
+To build a shared library instead of a static one:
+
+```
+cmake -S . -B build -DBUILD_SHARED_LIBS=ON
+cmake --build build
+```
+
 ## Example
 
 Run the sample host:
