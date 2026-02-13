@@ -1,6 +1,6 @@
 # Robot Remote Server C++
 
-A small C++20 library that implements the Robot Framework Remote Library XML-RPC interface. It lets a host C++ application register keywords and expose them over XML-RPC, similar to `nrobot-server`.
+A small C++20 library that implements the Robot Framework Remote Library XML-RPC interface. It lets a host C++ application register keywords and expose them over XML-RPC.
 
 ## Build
 
