@@ -9,8 +9,10 @@ using robot_remote::XmlRpcArray;
 using robot_remote::XmlRpcStruct;
 using robot_remote::XmlRpcValue;
 
+static constexpr int SERVER_PORT = 8279;
+
 int main() {
-    RemoteServer server(8270);
+    RemoteServer server(SERVER_PORT);
 
     KeywordSpec echo_keyword;
     echo_keyword.name = "Echo";
@@ -55,7 +57,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "Robot Remote server listening on port 8270. Press Enter to stop." << std::endl;
+    std::cout << "Robot Remote server listening on port " << SERVER_PORT << ". Press Enter to stop." << std::endl;
     std::cin.get();
 
     server.stop();
