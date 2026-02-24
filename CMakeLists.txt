@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(ROBOT_REMOTE_ENABLE_HTTP_SERVER "Enable integrated HTTP docs page for keywords" OFF)
 
 find_package(Threads REQUIRED)
 
@@ -18,6 +19,10 @@ add_library(robot_remote
 target_include_directories(robot_remote PUBLIC include)
 
 target_link_libraries(robot_remote PUBLIC Threads::Threads)
+
+if (ROBOT_REMOTE_ENABLE_HTTP_SERVER)
+    target_compile_definitions(robot_remote PUBLIC ROBOT_REMOTE_ENABLE_HTTP_SERVER)
+endif()
 
 target_compile_features(robot_remote PUBLIC cxx_std_20)
 
