@@ -157,7 +157,15 @@ XmlRpcValue RemoteServer::handle_call(const std::string &method, const std::vect
         if (params.empty()) {
             return XmlRpcValue("");
         }
-        auto it = keywords_.find(as_string(params[0]));
+        const std::string &name = as_string(params[0]);
+        if (name == "__intro__") {
+            return XmlRpcValue(library_info_.documentation);
+        }
+        if (name == "__init__") {
+            return XmlRpcValue("");
+        }
+
+        auto it = keywords_.find(name);
         if (it == keywords_.end()) {
             return XmlRpcValue("");
         }
@@ -168,7 +176,12 @@ XmlRpcValue RemoteServer::handle_call(const std::string &method, const std::vect
         if (params.empty()) {
             return XmlRpcValue(XmlRpcArray{});
         }
-        auto it = keywords_.find(as_string(params[0]));
+        const std::string &name = as_string(params[0]);
+        if (name == "__init__") {
+            return XmlRpcValue(XmlRpcArray{});
+        }
+
+        auto it = keywords_.find(name);
         if (it == keywords_.end()) {
             return XmlRpcValue(XmlRpcArray{});
         }
@@ -179,29 +192,45 @@ XmlRpcValue RemoteServer::handle_call(const std::string &method, const std::vect
         return XmlRpcValue(std::move(args));
     }
 
+    if (method == "get_keyword_tags") {
+        return XmlRpcValue(XmlRpcArray{});
+    }
+
+    if (method == "get_keyword_types") {
+        return XmlRpcValue(XmlRpcStruct{});
+    }
+
     if (method == "get_library_information") {
         XmlRpcStruct info;
-        info["name"] = XmlRpcValue(library_info_.name);
-        info["version"] = XmlRpcValue(library_info_.version);
-        info["doc"] = XmlRpcValue(library_info_.documentation);
-        info["scope"] = XmlRpcValue(library_info_.scope);
-        info["named_args"] = XmlRpcValue(library_info_.named_args);
 
-        XmlRpcArray keywords;
+        XmlRpcStruct intro;
+        intro["doc"] = XmlRpcValue(library_info_.documentation);
+        intro["args"] = XmlRpcValue(XmlRpcArray{});
+        intro["tags"] = XmlRpcValue(XmlRpcArray{});
+        intro["types"] = XmlRpcValue(XmlRpcStruct{});
+        info["__intro__"] = XmlRpcValue(std::move(intro));
+
+        XmlRpcStruct init;
+        init["doc"] = XmlRpcValue("");
+        init["args"] = XmlRpcValue(XmlRpcArray{});
+        init["tags"] = XmlRpcValue(XmlRpcArray{});
+        init["types"] = XmlRpcValue(XmlRpcStruct{});
+        info["__init__"] = XmlRpcValue(std::move(init));
+
         for (const auto &pair : keywords_) {
             const KeywordSpec &spec = pair.second;
             XmlRpcStruct kw;
-            kw["name"] = XmlRpcValue(spec.name);
             kw["doc"] = XmlRpcValue(spec.documentation);
             XmlRpcArray args;
             for (const auto &arg : spec.argument_spec) {
                 args.emplace_back(arg);
             }
             kw["args"] = XmlRpcValue(std::move(args));
-            keywords.emplace_back(XmlRpcValue(std::move(kw)));
+            kw["tags"] = XmlRpcValue(XmlRpcArray{});
+            kw["types"] = XmlRpcValue(XmlRpcStruct{});
+            info[spec.name] = XmlRpcValue(std::move(kw));
         }
 
-        info["keywords"] = XmlRpcValue(std::move(keywords));
         return XmlRpcValue(std::move(info));
     }
 
