@@ -1,0 +1,39 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default",
+      "description": "Default configure preset",
+      "binaryDir": "${sourceDir}/build/default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "http-server",
+      "displayName": "HTTP Server Enabled",
+      "description": "Configure with integrated HTTP keyword documentation server enabled",
+      "binaryDir": "${sourceDir}/build/http-server",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ROBOT_REMOTE_ENABLE_HTTP_SERVER": "TRUE"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default"
+    },
+    {
+      "name": "http-server",
+      "configurePreset": "http-server"
+    }
+  ]
+}

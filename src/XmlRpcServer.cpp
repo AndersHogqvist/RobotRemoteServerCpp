@@ -18,6 +18,12 @@ namespace robot_remote {
 
 namespace {
 
+struct HttpRequest {
+    std::string method;
+    std::string path;
+    std::string body;
+};
+
 struct XmlNode {
     std::string name;
     std::string text;
@@ -355,13 +361,13 @@ std::string read_exact(int fd, size_t bytes) {
     return out;
 }
 
-std::string read_request(int fd) {
+std::optional<HttpRequest> read_request(int fd) {
     std::string buffer;
     char chunk[4096];
     while (buffer.find("\r\n\r\n") == std::string::npos) {
         ssize_t read_now = ::recv(fd, chunk, sizeof(chunk), 0);
         if (read_now <= 0) {
-            return {};
+            return std::nullopt;
         }
         buffer.append(chunk, static_cast<size_t>(read_now));
         if (buffer.size() > 1024 * 1024) {
@@ -371,24 +377,40 @@ std::string read_request(int fd) {
 
     size_t header_end = buffer.find("\r\n\r\n");
     std::string headers = buffer.substr(0, header_end + 4);
+    std::istringstream header_stream(headers);
+    std::string request_line;
+    if (!std::getline(header_stream, request_line)) {
+        throw std::runtime_error("Missing request line");
+    }
+    if (!request_line.empty() && request_line.back() == '\r') {
+        request_line.pop_back();
+    }
+
+    std::istringstream request_line_stream(request_line);
+    HttpRequest request;
+    std::string http_version;
+    if (!(request_line_stream >> request.method >> request.path >> http_version)) {
+        throw std::runtime_error("Invalid request line");
+    }
+
     std::optional<int> content_length = parse_content_length(headers);
-    std::string body = buffer.substr(header_end + 4);
+    request.body = buffer.substr(header_end + 4);
 
     if (content_length) {
-        if (body.size() < static_cast<size_t>(*content_length)) {
-            body += read_exact(fd, static_cast<size_t>(*content_length) - body.size());
-        } else if (body.size() > static_cast<size_t>(*content_length)) {
-            body.resize(static_cast<size_t>(*content_length));
+        if (request.body.size() < static_cast<size_t>(*content_length)) {
+            request.body += read_exact(fd, static_cast<size_t>(*content_length) - request.body.size());
+        } else if (request.body.size() > static_cast<size_t>(*content_length)) {
+            request.body.resize(static_cast<size_t>(*content_length));
         }
     }
 
-    return body;
+    return request;
 }
 
-void send_response(int fd, const std::string &body) {
+void send_response(int fd, const std::string &status_line, const std::string &content_type, const std::string &body) {
     std::ostringstream out;
-    out << "HTTP/1.1 200 OK\r\n";
-    out << "Content-Type: text/xml\r\n";
+    out << "HTTP/1.1 " << status_line << "\r\n";
+    out << "Content-Type: " << content_type << "\r\n";
     out << "Content-Length: " << body.size() << "\r\n";
     out << "Connection: close\r\n\r\n";
     out << body;
@@ -403,9 +425,22 @@ void send_response(int fd, const std::string &body) {
     }
 }
 
+void send_xml_response(int fd, const std::string &body) {
+    send_response(fd, "200 OK", "text/xml", body);
+}
+
+void send_text_response(int fd, const std::string &status_line, const std::string &body) {
+    send_response(fd, status_line, "text/plain; charset=utf-8", body);
+}
+
+void send_html_response(int fd, const std::string &body) {
+    send_response(fd, "200 OK", "text/html; charset=utf-8", body);
+}
+
 }  // namespace
 
-XmlRpcServer::XmlRpcServer(int port, MethodHandler handler) : port_(port), handler_(std::move(handler)) {}
+XmlRpcServer::XmlRpcServer(int port, MethodHandler handler, HttpPageHandler http_page_handler)
+    : port_(port), handler_(std::move(handler)), http_page_handler_(std::move(http_page_handler)) {}
 
 XmlRpcServer::~XmlRpcServer() {
     stop();
@@ -486,17 +521,41 @@ void XmlRpcServer::run() {
         }
 
         try {
-            std::string body = read_request(client_fd);
-            if (body.empty()) {
+            std::optional<HttpRequest> request = read_request(client_fd);
+            if (!request) {
                 ::close(client_fd);
                 continue;
             }
 
-            XmlParser parser(body);
+#ifdef ROBOT_REMOTE_ENABLE_HTTP_SERVER
+            if (request->method == "GET") {
+                if ((request->path == "/" || request->path == "/index.html") && http_page_handler_) {
+                    send_html_response(client_fd, http_page_handler_());
+                } else {
+                    send_text_response(client_fd, "404 Not Found", "Not Found");
+                }
+                ::close(client_fd);
+                continue;
+            }
+#endif
+
+            if (request->method != "POST") {
+                send_text_response(client_fd, "405 Method Not Allowed", "Only POST is supported for XML-RPC");
+                ::close(client_fd);
+                continue;
+            }
+
+            if (request->body.empty()) {
+                send_response(client_fd, "400 Bad Request", "text/xml", make_fault_response(400, "Missing request body"));
+                ::close(client_fd);
+                continue;
+            }
+
+            XmlParser parser(request->body);
             XmlNode root = parser.parse();
             const XmlNode *method_name_node = find_child(root, "methodName");
             if (!method_name_node) {
-                send_response(client_fd, make_fault_response(400, "Missing methodName"));
+                send_xml_response(client_fd, make_fault_response(400, "Missing methodName"));
                 ::close(client_fd);
                 continue;
             }
@@ -514,9 +573,9 @@ void XmlRpcServer::run() {
             }
 
             XmlRpcValue result = handler_(method_name, params);
-            send_response(client_fd, make_method_response(result));
+            send_xml_response(client_fd, make_method_response(result));
         } catch (const std::exception &ex) {
-            send_response(client_fd, make_fault_response(500, ex.what()));
+            send_xml_response(client_fd, make_fault_response(500, ex.what()));
         }
 
         ::close(client_fd);

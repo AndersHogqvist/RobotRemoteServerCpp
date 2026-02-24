@@ -16,6 +16,13 @@ cmake -S . -B build -DBUILD_SHARED_LIBS=ON
 cmake --build build
 ```
 
+To enable the integrated HTTP documentation page (keyword list, docs, and arguments):
+
+```
+cmake -S . -B build -DROBOT_REMOTE_ENABLE_HTTP_SERVER=ON
+cmake --build build
+```
+
 ## Example
 
 Run the sample host:
@@ -25,6 +32,8 @@ Run the sample host:
 ```
 
 Then use a Robot Framework test with the Remote library:
+
+When built with `ROBOT_REMOTE_ENABLE_HTTP_SERVER=ON`, open `http://127.0.0.1:8270/` in a browser to view the available keywords with their description and argument specification.
 
 ```
 *** Settings ***

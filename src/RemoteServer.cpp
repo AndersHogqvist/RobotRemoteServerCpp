@@ -1,5 +1,6 @@
 #include "robot_remote/RemoteServer.h"
 
+#include <sstream>
 #include <stdexcept>
 
 namespace robot_remote {
@@ -34,6 +35,34 @@ const std::string &as_string(const XmlRpcValue &value) {
     return std::get<std::string>(value.value);
 }
 
+std::string html_escape(const std::string &value) {
+    std::string out;
+    out.reserve(value.size());
+    for (char ch : value) {
+        switch (ch) {
+        case '&':
+            out += "&amp;";
+            break;
+        case '<':
+            out += "&lt;";
+            break;
+        case '>':
+            out += "&gt;";
+            break;
+        case '"':
+            out += "&quot;";
+            break;
+        case '\'':
+            out += "&#39;";
+            break;
+        default:
+            out.push_back(ch);
+            break;
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 RemoteServer::RemoteServer(int port) : port_(port) {}
@@ -55,7 +84,7 @@ bool RemoteServer::start() {
     }
     server_ = std::make_unique<XmlRpcServer>(port_, [this](const std::string &method, const std::vector<XmlRpcValue> &params) {
         return handle_call(method, params);
-    });
+    }, [this]() { return build_keywords_page(); });
     return server_->start();
 }
 
@@ -69,6 +98,50 @@ void RemoteServer::stop() {
 
 bool RemoteServer::is_running() const {
     return server_ && server_->is_running();
+}
+
+std::string RemoteServer::build_keywords_page() const {
+    std::ostringstream out;
+    out << "<!doctype html><html><head><meta charset=\"utf-8\">";
+    out << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
+    out << "<title>" << html_escape(library_info_.name.empty() ? "Robot Remote Server" : library_info_.name) << "</title>";
+    out << "<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;line-height:1.5;}";
+    out << "h1,h2{margin-bottom:.4rem;} .kw{border:1px solid #d7dbe0;border-radius:8px;padding:1rem;margin:1rem 0;}";
+    out << "ul{margin:.4rem 0 0 1.2rem;}code{background:#f4f6f8;padding:.1rem .35rem;border-radius:4px;}</style></head><body>";
+
+    out << "<h1>" << html_escape(library_info_.name.empty() ? "Robot Remote Library" : library_info_.name) << "</h1>";
+    if (!library_info_.version.empty()) {
+        out << "<p><strong>Version:</strong> " << html_escape(library_info_.version) << "</p>";
+    }
+    if (!library_info_.documentation.empty()) {
+        out << "<p>" << html_escape(library_info_.documentation) << "</p>";
+    }
+
+    out << "<h2>Available keywords</h2>";
+    if (keywords_.empty()) {
+        out << "<p>No keywords registered.</p>";
+    }
+
+    for (const auto &pair : keywords_) {
+        const KeywordSpec &keyword = pair.second;
+        out << "<section class=\"kw\">";
+        out << "<h3>" << html_escape(keyword.name) << "</h3>";
+        out << "<p>" << html_escape(keyword.documentation.empty() ? "(no description)" : keyword.documentation) << "</p>";
+        out << "<p><strong>Arguments</strong></p>";
+        if (keyword.argument_spec.empty()) {
+            out << "<p><em>None</em></p>";
+        } else {
+            out << "<ul>";
+            for (const auto &argument : keyword.argument_spec) {
+                out << "<li><code>" << html_escape(argument) << "</code></li>";
+            }
+            out << "</ul>";
+        }
+        out << "</section>";
+    }
+
+    out << "</body></html>";
+    return out.str();
 }
 
 XmlRpcValue RemoteServer::handle_call(const std::string &method, const std::vector<XmlRpcValue> &params) {

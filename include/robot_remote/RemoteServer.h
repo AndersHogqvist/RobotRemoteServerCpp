@@ -69,6 +69,7 @@ public:
 
 private:
     XmlRpcValue handle_call(const std::string &method, const std::vector<XmlRpcValue> &params);
+    std::string build_keywords_page() const;
 
     int port_;
     LibraryInfo library_info_{};

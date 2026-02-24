@@ -15,9 +15,11 @@ class XmlRpcServer {
 public:
     /// Callback for handling XML-RPC method calls.
     using MethodHandler = std::function<XmlRpcValue(const std::string &, const std::vector<XmlRpcValue> &)>;
+    /// Callback for producing an HTTP HTML page.
+    using HttpPageHandler = std::function<std::string()>;
 
     /// Create a server that listens on the given port.
-    XmlRpcServer(int port, MethodHandler handler);
+    XmlRpcServer(int port, MethodHandler handler, HttpPageHandler http_page_handler = {});
     ~XmlRpcServer();
 
     /// Start the server loop on a background thread.
@@ -32,6 +34,7 @@ private:
 
     int port_;
     MethodHandler handler_;
+    HttpPageHandler http_page_handler_;
     std::atomic<bool> running_{false};
     std::thread thread_;
     int server_fd_{-1};
