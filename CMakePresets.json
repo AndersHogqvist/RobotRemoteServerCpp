@@ -7,19 +7,41 @@
   },
   "configurePresets": [
     {
-      "name": "default",
-      "displayName": "Default",
+      "name": "default-release",
+      "displayName": "Default release (include HTTP Server, static library)",
       "description": "Default configure preset",
       "binaryDir": "${sourceDir}/build/default",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Release",
+        "ROBOT_REMOTE_ENABLE_HTTP_SERVER": "TRUE"
       }
     },
     {
-      "name": "http-server",
-      "displayName": "HTTP Server Enabled",
-      "description": "Configure with integrated HTTP keyword documentation server enabled",
-      "binaryDir": "${sourceDir}/build/http-server",
+      "name": "release-no-http",
+      "displayName": "Release without HTTP Server (static library)",
+      "description": "Configure without integrated HTTP keyword documentation server",
+      "binaryDir": "${sourceDir}/build/release-no-http",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ROBOT_REMOTE_ENABLE_HTTP_SERVER": "FALSE"
+      }
+    },
+    {
+      "name": "release-http-shared",
+      "displayName": "Release with HTTP Server (shared library)",
+      "description": "Configure with integrated HTTP keyword documentation server",
+      "binaryDir": "${sourceDir}/build/release-http-shared",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ROBOT_REMOTE_ENABLE_HTTP_SERVER": "TRUE",
+        "BUILD_SHARED_LIBS": "TRUE"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "description": "Configure debug build",
+      "binaryDir": "${sourceDir}/build/debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "ROBOT_REMOTE_ENABLE_HTTP_SERVER": "TRUE"
@@ -29,11 +51,15 @@
   "buildPresets": [
     {
       "name": "default",
-      "configurePreset": "default"
+      "configurePreset": "default-release"
     },
     {
-      "name": "http-server",
-      "configurePreset": "http-server"
+      "name": "release-no-http",
+      "configurePreset": "release-no-http"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug"
     }
   ]
 }
