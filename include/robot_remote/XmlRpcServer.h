@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -38,7 +39,8 @@ private:
   HttpPageHandler http_page_handler_;
   std::atomic<bool> running_{false};
   std::thread thread_;
-  int server_fd_{-1};
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace robot_remote

@@ -2,17 +2,22 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstring>
-#include <netinet/in.h>
+#include <cstdint>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <unistd.h>
+
+#include <asio.hpp>
 
 namespace robot_remote {
+
+using tcp = asio::ip::tcp;
+
+struct XmlRpcServer::Impl {
+  std::unique_ptr<asio::io_context> ioc;
+  std::unique_ptr<tcp::acceptor> acceptor;
+};
 
 namespace {
 
@@ -354,29 +359,26 @@ std::optional<int> parse_content_length(const std::string &headers) {
   return std::nullopt;
 }
 
-std::string read_exact(int fd, size_t bytes) {
-  std::string out;
+void read_exact(tcp::socket &socket, std::string &out, size_t bytes) {
   out.resize(bytes);
-  size_t offset = 0;
-  while (offset < bytes) {
-    ssize_t read_now = ::recv(fd, out.data() + offset, bytes - offset, 0);
-    if (read_now <= 0) {
-      throw std::runtime_error("Connection closed");
-    }
-    offset += static_cast<size_t>(read_now);
+  asio::error_code ec;
+  asio::read(socket, asio::buffer(out.data(), out.size()), ec);
+  if (ec) {
+    throw std::runtime_error("Connection closed");
   }
-  return out;
 }
 
-std::optional<HttpRequest> read_request(int fd) {
+std::optional<HttpRequest> read_request(tcp::socket &socket) {
   std::string buffer;
   char chunk[4096];
   while (buffer.find("\r\n\r\n") == std::string::npos) {
-    ssize_t read_now = ::recv(fd, chunk, sizeof(chunk), 0);
-    if (read_now <= 0) {
+    asio::error_code ec;
+    const std::size_t read_now =
+        socket.read_some(asio::buffer(chunk, sizeof(chunk)), ec);
+    if (ec || read_now == 0) {
       return std::nullopt;
     }
-    buffer.append(chunk, static_cast<size_t>(read_now));
+    buffer.append(chunk, read_now);
     if (buffer.size() > 1024 * 1024) {
       throw std::runtime_error("Header too large");
     }
@@ -406,8 +408,10 @@ std::optional<HttpRequest> read_request(int fd) {
 
   if (content_length) {
     if (request.body.size() < static_cast<size_t>(*content_length)) {
-      request.body += read_exact(fd, static_cast<size_t>(*content_length) -
-                                         request.body.size());
+      std::string rest;
+      read_exact(socket, rest,
+                 static_cast<size_t>(*content_length) - request.body.size());
+      request.body += rest;
     } else if (request.body.size() > static_cast<size_t>(*content_length)) {
       request.body.resize(static_cast<size_t>(*content_length));
     }
@@ -416,7 +420,7 @@ std::optional<HttpRequest> read_request(int fd) {
   return request;
 }
 
-void send_response(int fd, const std::string &status_line,
+void send_response(tcp::socket &socket, const std::string &status_line,
                    const std::string &content_type, const std::string &body) {
   std::ostringstream out;
   out << "HTTP/1.1 " << status_line << "\r\n";
@@ -425,34 +429,28 @@ void send_response(int fd, const std::string &status_line,
   out << "Connection: close\r\n\r\n";
   out << body;
   std::string payload = out.str();
-  size_t offset = 0;
-  while (offset < payload.size()) {
-    ssize_t wrote =
-        ::send(fd, payload.data() + offset, payload.size() - offset, 0);
-    if (wrote <= 0) {
-      break;
-    }
-    offset += static_cast<size_t>(wrote);
-  }
+  asio::error_code ec;
+  asio::write(socket, asio::buffer(payload), ec);
+  (void)ec;
 }
 
-void send_xml_response(int fd, const std::string &body) {
-  send_response(fd, "200 OK", "text/xml", body);
+void send_xml_response(tcp::socket &socket, const std::string &body) {
+  send_response(socket, "200 OK", "text/xml", body);
 }
 
-void send_text_response(int fd, const std::string &status_line,
+void send_text_response(tcp::socket &socket, const std::string &status_line,
                         const std::string &body) {
-  send_response(fd, status_line, "text/plain; charset=utf-8", body);
+  send_response(socket, status_line, "text/plain; charset=utf-8", body);
 }
 
-void send_html_response(int fd, const std::string &body) {
-  send_response(fd, "200 OK", "text/html; charset=utf-8", body);
+void send_html_response(tcp::socket &socket, const std::string &body) {
+  send_response(socket, "200 OK", "text/html; charset=utf-8", body);
 }
 
 } // namespace
 
 XmlRpcServer::XmlRpcServer(int port, MethodHandler handler,
-                           HttpPageHandler http_page_handler)
+                             HttpPageHandler http_page_handler)
     : port_(port), handler_(std::move(handler)),
       http_page_handler_(std::move(http_page_handler)) {}
 
@@ -462,79 +460,57 @@ bool XmlRpcServer::start() {
   if (running_) {
     return false;
   }
+  if (thread_.joinable()) {
+    thread_.join();
+  }
+  impl_ = std::make_unique<Impl>();
+  impl_->ioc = std::make_unique<asio::io_context>();
+  try {
+    const auto port_u16 = static_cast<std::uint16_t>(port_);
+    impl_->acceptor = std::make_unique<tcp::acceptor>(
+        *impl_->ioc, tcp::endpoint(tcp::v4(), port_u16));
+    impl_->acceptor->set_option(asio::socket_base::reuse_address(true));
+  } catch (const std::exception &) {
+    impl_.reset();
+    return false;
+  }
+
   running_ = true;
   thread_ = std::thread(&XmlRpcServer::run, this);
   return true;
 }
 
 void XmlRpcServer::stop() {
-  if (!running_) {
-    return;
-  }
   running_ = false;
-  if (server_fd_ >= 0) {
-    ::shutdown(server_fd_, SHUT_RDWR);
-    ::close(server_fd_);
-    server_fd_ = -1;
+  if (impl_ && impl_->acceptor) {
+    asio::error_code ec;
+    impl_->acceptor->close(ec);
   }
   if (thread_.joinable()) {
     thread_.join();
   }
+  impl_.reset();
 }
 
 bool XmlRpcServer::is_running() const { return running_; }
 
 void XmlRpcServer::run() {
-  server_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (server_fd_ < 0) {
-    running_ = false;
-    return;
-  }
-
-  int opt = 1;
-  ::setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = INADDR_ANY;
-  addr.sin_port = htons(static_cast<uint16_t>(port_));
-
-  if (::bind(server_fd_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) <
-      0) {
-    ::close(server_fd_);
-    server_fd_ = -1;
-    running_ = false;
-    return;
-  }
-
-  if (::listen(server_fd_, 8) < 0) {
-    ::close(server_fd_);
-    server_fd_ = -1;
+  if (!impl_ || !impl_->acceptor || !impl_->ioc) {
     running_ = false;
     return;
   }
 
   while (running_) {
-    fd_set set;
-    FD_ZERO(&set);
-    FD_SET(server_fd_, &set);
-    timeval timeout{};
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 200000;
-    int ready = ::select(server_fd_ + 1, &set, nullptr, nullptr, &timeout);
-    if (ready <= 0 || !FD_ISSET(server_fd_, &set)) {
-      continue;
-    }
-
-    int client_fd = ::accept(server_fd_, nullptr, nullptr);
-    if (client_fd < 0) {
-      continue;
+    tcp::socket socket(*impl_->ioc);
+    asio::error_code ec;
+    impl_->acceptor->accept(socket, ec);
+    if (ec) {
+      break;
     }
 
     try {
-      std::optional<HttpRequest> request = read_request(client_fd);
+      std::optional<HttpRequest> request = read_request(socket);
       if (!request) {
-        ::close(client_fd);
         continue;
       }
 
@@ -542,26 +518,23 @@ void XmlRpcServer::run() {
       if (request->method == "GET") {
         if ((request->path == "/" || request->path == "/index.html") &&
             http_page_handler_) {
-          send_html_response(client_fd, http_page_handler_());
+          send_html_response(socket, http_page_handler_());
         } else {
-          send_text_response(client_fd, "404 Not Found", "Not Found");
+          send_text_response(socket, "404 Not Found", "Not Found");
         }
-        ::close(client_fd);
         continue;
       }
 #endif
 
       if (request->method != "POST") {
-        send_text_response(client_fd, "405 Method Not Allowed",
+        send_text_response(socket, "405 Method Not Allowed",
                            "Only POST is supported for XML-RPC");
-        ::close(client_fd);
         continue;
       }
 
       if (request->body.empty()) {
-        send_response(client_fd, "400 Bad Request", "text/xml",
+        send_response(socket, "400 Bad Request", "text/xml",
                       make_fault_response(400, "Missing request body"));
-        ::close(client_fd);
         continue;
       }
 
@@ -569,9 +542,8 @@ void XmlRpcServer::run() {
       XmlNode root = parser.parse();
       const XmlNode *method_name_node = find_child(root, "methodName");
       if (!method_name_node) {
-        send_xml_response(client_fd,
+        send_xml_response(socket,
                           make_fault_response(400, "Missing methodName"));
-        ::close(client_fd);
         continue;
       }
 
@@ -588,13 +560,13 @@ void XmlRpcServer::run() {
       }
 
       XmlRpcValue result = handler_(method_name, params);
-      send_xml_response(client_fd, make_method_response(result));
+      send_xml_response(socket, make_method_response(result));
     } catch (const std::exception &ex) {
-      send_xml_response(client_fd, make_fault_response(500, ex.what()));
+      send_xml_response(socket, make_fault_response(500, ex.what()));
     }
-
-    ::close(client_fd);
   }
+
+  running_ = false;
 }
 
 } // namespace robot_remote
