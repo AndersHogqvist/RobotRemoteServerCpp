@@ -25,8 +25,8 @@ add_library(robot_remote
     src/XmlRpcServer.cpp
 )
 
-target_include_directories(robot_remote PUBLIC include)
-target_include_directories(robot_remote PRIVATE
+target_include_directories(robot_remote PUBLIC
+    include
     ${standalone_asio_SOURCE_DIR}/asio/include)
 
 target_compile_definitions(robot_remote PUBLIC ASIO_STANDALONE)

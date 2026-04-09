@@ -502,6 +502,64 @@ void XmlRpcServer::stop() {
 
 bool XmlRpcServer::is_running() const { return running_; }
 
+void XmlRpcServer::serve_client(tcp::socket socket) {
+  try {
+    std::optional<HttpRequest> request = read_request(socket);
+    if (!request) {
+      return;
+    }
+
+#ifdef ROBOT_REMOTE_ENABLE_HTTP_SERVER
+    if (request->method == "GET") {
+      if ((request->path == "/" || request->path == "/index.html") &&
+          http_page_handler_) {
+        send_html_response(socket, http_page_handler_());
+      } else {
+        send_text_response(socket, "404 Not Found", "Not Found");
+      }
+      return;
+    }
+#endif
+
+    if (request->method != "POST") {
+      send_text_response(socket, "405 Method Not Allowed",
+                         "Only POST is supported for XML-RPC");
+      return;
+    }
+
+    if (request->body.empty()) {
+      send_response(socket, "400 Bad Request", "text/xml",
+                    make_fault_response(400, "Missing request body"));
+      return;
+    }
+
+    XmlParser parser(request->body);
+    XmlNode root = parser.parse();
+    const XmlNode *method_name_node = find_child(root, "methodName");
+    if (!method_name_node) {
+      send_xml_response(socket, make_fault_response(400, "Missing methodName"));
+      return;
+    }
+
+    std::string method_name = trim(method_name_node->text);
+    std::vector<XmlRpcValue> params;
+    const XmlNode *params_node = find_child(root, "params");
+    if (params_node) {
+      for (const auto *param : find_children(*params_node, "param")) {
+        const XmlNode *value_node = find_child(*param, "value");
+        if (value_node) {
+          params.push_back(parse_value(*value_node));
+        }
+      }
+    }
+
+    XmlRpcValue result = handler_(method_name, params);
+    send_xml_response(socket, make_method_response(result));
+  } catch (const std::exception &ex) {
+    send_xml_response(socket, make_fault_response(500, ex.what()));
+  }
+}
+
 void XmlRpcServer::run() {
   if (!impl_ || !impl_->acceptor || !impl_->ioc) {
     running_ = false;
@@ -516,62 +574,9 @@ void XmlRpcServer::run() {
       break;
     }
 
-    try {
-      std::optional<HttpRequest> request = read_request(socket);
-      if (!request) {
-        continue;
-      }
-
-#ifdef ROBOT_REMOTE_ENABLE_HTTP_SERVER
-      if (request->method == "GET") {
-        if ((request->path == "/" || request->path == "/index.html") &&
-            http_page_handler_) {
-          send_html_response(socket, http_page_handler_());
-        } else {
-          send_text_response(socket, "404 Not Found", "Not Found");
-        }
-        continue;
-      }
-#endif
-
-      if (request->method != "POST") {
-        send_text_response(socket, "405 Method Not Allowed",
-                           "Only POST is supported for XML-RPC");
-        continue;
-      }
-
-      if (request->body.empty()) {
-        send_response(socket, "400 Bad Request", "text/xml",
-                      make_fault_response(400, "Missing request body"));
-        continue;
-      }
-
-      XmlParser parser(request->body);
-      XmlNode root = parser.parse();
-      const XmlNode *method_name_node = find_child(root, "methodName");
-      if (!method_name_node) {
-        send_xml_response(socket,
-                          make_fault_response(400, "Missing methodName"));
-        continue;
-      }
-
-      std::string method_name = trim(method_name_node->text);
-      std::vector<XmlRpcValue> params;
-      const XmlNode *params_node = find_child(root, "params");
-      if (params_node) {
-        for (const auto *param : find_children(*params_node, "param")) {
-          const XmlNode *value_node = find_child(*param, "value");
-          if (value_node) {
-            params.push_back(parse_value(*value_node));
-          }
-        }
-      }
-
-      XmlRpcValue result = handler_(method_name, params);
-      send_xml_response(socket, make_method_response(result));
-    } catch (const std::exception &ex) {
-      send_xml_response(socket, make_fault_response(500, ex.what()));
-    }
+    std::thread([this, sock = std::move(socket)]() mutable {
+      serve_client(std::move(sock));
+    }).detach();
   }
 
   running_ = false;

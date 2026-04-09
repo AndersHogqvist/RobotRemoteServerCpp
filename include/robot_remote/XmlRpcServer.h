@@ -7,6 +7,8 @@
 #include <thread>
 #include <vector>
 
+#include <asio.hpp>
+
 #include "robot_remote/XmlRpcValue.h"
 
 namespace robot_remote {
@@ -33,6 +35,7 @@ public:
 
 private:
   void run();
+  void serve_client(asio::ip::tcp::socket socket);
 
   int port_;
   MethodHandler handler_;
