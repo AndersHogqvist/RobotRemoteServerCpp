@@ -467,16 +467,24 @@ bool XmlRpcServer::start() {
   impl_->ioc = std::make_unique<asio::io_context>();
   try {
     const auto port_u16 = static_cast<std::uint16_t>(port_);
-    impl_->acceptor = std::make_unique<tcp::acceptor>(
-        *impl_->ioc, tcp::endpoint(tcp::v4(), port_u16));
+    impl_->acceptor = std::make_unique<tcp::acceptor>(*impl_->ioc);
+    impl_->acceptor->open(tcp::v4());
     impl_->acceptor->set_option(asio::socket_base::reuse_address(true));
+    impl_->acceptor->bind(tcp::endpoint(tcp::v4(), port_u16));
+    impl_->acceptor->listen();
   } catch (const std::exception &) {
     impl_.reset();
     return false;
   }
 
   running_ = true;
-  thread_ = std::thread(&XmlRpcServer::run, this);
+  try {
+    thread_ = std::thread(&XmlRpcServer::run, this);
+  } catch (...) {
+    running_ = false;
+    impl_.reset();
+    return false;
+  }
   return true;
 }
 
