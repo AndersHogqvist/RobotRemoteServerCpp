@@ -12,14 +12,30 @@ option(ROBOT_REMOTE_ENABLE_HTTP_SERVER "Enable integrated HTTP docs page for key
 
 find_package(Threads REQUIRED)
 
+include(FetchContent)
+FetchContent_Declare(
+    standalone_asio
+    GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
+    GIT_TAG asio-1-36-0
+)
+FetchContent_MakeAvailable(standalone_asio)
+
 add_library(robot_remote
     src/RemoteServer.cpp
     src/XmlRpcServer.cpp
 )
 
-target_include_directories(robot_remote PUBLIC include)
+target_include_directories(robot_remote PUBLIC
+    include
+    ${standalone_asio_SOURCE_DIR}/asio/include)
+
+target_compile_definitions(robot_remote PUBLIC ASIO_STANDALONE)
 
 target_link_libraries(robot_remote PUBLIC Threads::Threads)
+
+if (WIN32)
+    target_link_libraries(robot_remote PUBLIC ws2_32)
+endif()
 
 if (ROBOT_REMOTE_ENABLE_HTTP_SERVER)
     target_compile_definitions(robot_remote PUBLIC ROBOT_REMOTE_ENABLE_HTTP_SERVER)

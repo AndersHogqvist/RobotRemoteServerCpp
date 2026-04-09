@@ -2,9 +2,12 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <asio.hpp>
 
 #include "robot_remote/XmlRpcValue.h"
 
@@ -32,13 +35,15 @@ public:
 
 private:
   void run();
+  void serve_client(asio::ip::tcp::socket socket);
 
   int port_;
   MethodHandler handler_;
   HttpPageHandler http_page_handler_;
   std::atomic<bool> running_{false};
   std::thread thread_;
-  int server_fd_{-1};
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace robot_remote
