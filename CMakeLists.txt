@@ -13,11 +13,24 @@ option(ROBOT_REMOTE_ENABLE_HTTP_SERVER "Enable integrated HTTP docs page for key
 find_package(Threads REQUIRED)
 
 include(FetchContent)
-FetchContent_Declare(
-    standalone_asio
-    GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
-    GIT_TAG asio-1-36-0
-)
+
+set(ROBOT_REMOTE_ASIO_VERSION "asio-1-36-0" CACHE STRING
+    "Asio release tag to fetch for RobotRemoteServerCpp")
+set(ROBOT_REMOTE_ASIO_SOURCE_DIR "" CACHE PATH
+    "Optional local Asio source directory to use instead of downloading")
+
+if(ROBOT_REMOTE_ASIO_SOURCE_DIR)
+    FetchContent_Declare(
+        standalone_asio
+        SOURCE_DIR ${ROBOT_REMOTE_ASIO_SOURCE_DIR}
+    )
+else()
+    FetchContent_Declare(
+        standalone_asio
+        URL https://github.com/chriskohlhoff/asio/archive/refs/tags/${ROBOT_REMOTE_ASIO_VERSION}.tar.gz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+endif()
 FetchContent_MakeAvailable(standalone_asio)
 
 add_library(robot_remote
